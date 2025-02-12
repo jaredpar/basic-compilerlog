@@ -25,9 +25,9 @@ using TraceReloggerLib;
 
 #pragma warning disable 8321
 
-var zipFilePath = @"C:\Users\jaredpar\Downloads\msbuild_logs.zip";
+//var zipFilePath = @"C:\Users\jaredpar\Downloads\msbuild_logs.zip";
 //using var reader = CompilerLogReader.Create(zipFilePath);
-RunComplog($"print -c {zipFilePath}");
+RunComplog($@"replay --compiler C:\Users\jaredpar\Downloads\dotnet-sdk-9.0.200-win-x64\sdk\9.0.200\Roslyn\bincore -p WinStore.DataContracts2.csproj C:\Users\jaredpar\Downloads\msbuild_logs\msbuild.complog");
 
 
 
@@ -366,7 +366,7 @@ static void ExportScratch()
 
     using var reader = CompilerLogReader.Create(filePath, BasicAnalyzerKind.None);
     var exportUtil = new ExportUtil(reader);
-    exportUtil.ExportAll(dest, SdkUtil.GetSdkDirectories());
+    exportUtil.ExportAll(dest, SdkUtil.GetRoslynSdkDirectories());
 }
 
 static void RoslynScratch()
@@ -470,7 +470,7 @@ void ExportTest(CompilerLogReader reader)
     var dest = @"c:\users\jaredpar\temp\export";
     EmptyDirectory(dest);
 
-    var d = SdkUtil.GetSdkDirectories();
+    var d = SdkUtil.GetRoslynSdkDirectories();
     var util = new ExportUtil(reader);
     util.ExportAll(dest, d);
 }

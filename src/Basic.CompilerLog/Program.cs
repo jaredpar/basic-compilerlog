@@ -5,6 +5,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Mono.Options;
 using StructuredLogViewer;
 using System.Diagnostics;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.Loader;
 using System.Text;
@@ -343,7 +344,7 @@ int RunExport(IEnumerable<string> args)
         WriteLine($"Exporting to {baseOutputPath}");
         Directory.CreateDirectory(baseOutputPath);
 
-        var sdkDirs = SdkUtil.GetSdkDirectories();
+        var sdkDirs = SdkUtil.GetRoslynSdkDirectories();
         for (int i = 0; i < compilerCalls.Count; i++)
         {
             var compilerCall = compilerCalls[i];
@@ -451,11 +452,13 @@ int RunResponseFile(IEnumerable<string> args)
 int RunReplay(IEnumerable<string> args)
 {
     string? baseOutputPath = null;
+    string? compilerPath = null;
     var severity = DiagnosticSeverity.Warning;
     var options = new FilterOptionSet(analyzers: true)
     {
         { "severity=", "minimum severity to display (default Warning)", (DiagnosticSeverity s) => severity = s },
         { "o|out=", "path to emit to ", void (string b) => baseOutputPath = b },
+        { "c|compiler=", "path to compiler to use for replay", void (string c) => compilerPath = c },
     };
 
     try
@@ -471,6 +474,11 @@ int RunReplay(IEnumerable<string> args)
         {
             baseOutputPath = GetBaseOutputPath(baseOutputPath);
             WriteLine($"Outputting to {baseOutputPath}");
+        }
+
+        if (compilerPath is not null && AssemblyLoadContext.Default == AssemblyLoadContext.GetLoadContext(typeof(Program).Assembly))
+        {
+            return RunInContext(["replay", .. args], compilerPath);
         }
 
         using var reader = GetCompilerCallReader(extra, options.BasicAnalyzerKind, checkVersion: true);
@@ -891,3 +899,46 @@ static string GetResolvedPath(string baseDirectory, string path)
 
 static void Write(string str) => Constants.Out.Write(str);
 static void WriteLine(string line) => Constants.Out.WriteLine(line);
+
+static int RunInContext(string[] args, string compilerDirectory)
+{
+    var alc = CreateContext(compilerDirectory, Path.GetDirectoryName(typeof(Program).Assembly.Location)!);  
+    var assemblyName = typeof(Program).Assembly.GetName();
+    var assembly = alc.LoadFromAssemblyName(assemblyName);
+    var program = assembly.GetType("Program", throwOnError: true);
+    var main = program!.GetMethod("<Main>$", BindingFlags.Static | BindingFlags.NonPublic);
+    try
+    {
+        var ret = main!.Invoke(null, (object[])[args])!;
+        return (int)ret;
+    }
+    catch (TargetInvocationException e)
+    {
+        throw e.InnerException!;
+    }
+    finally
+    {
+        alc.Unload();
+    }
+
+    static AssemblyLoadContext CreateContext(string compilerDirectory, string compilerLogDirectory)
+    {
+        var alc = new AssemblyLoadContext("Custom Compiler Load Context", isCollectible: true);
+        var hashSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var dir in (string[])[compilerDirectory, compilerLogDirectory])
+        {
+            foreach (var dllFilePath in Directory.EnumerateFiles(dir, "*.dll"))
+            {
+                if (RoslynUtil.TryReadMvid(dllFilePath) is { })
+                {
+                    if (RoslynUtil.ReadAssemblyName(dllFilePath) is { } n && hashSet.Add(n))
+                    {
+                        alc.LoadFromAssemblyPath(dllFilePath);
+                    }
+                }
+            }
+        }
+
+        return alc;
+    }
+}
